@@ -60,6 +60,20 @@ class FeedsUserProcessor extends FeedsProcessor {
       $account->mail = $account->mail . '_test';
     }
     user_save($account, (array) $account);
+    if ($account->uid && !empty($account->pass_crypted)) {
+      $account_update = (object) array('uid' => $account->uid, 'pass' => $account->pass_crypted);
+      drupal_write_record('users', $account_update, 'uid');
+    }
+    if ($account->uid && !empty($account->pass_md5)) {
+      require_once DRUPAL_ROOT . '/' . variable_get('password_inc', 'includes/password.inc');
+      $new_hash = user_hash_password($account->pass_md5, 11);
+      if ($new_hash) {
+        // Indicate an updated password.
+        $new_hash  = 'U' . $new_hash;
+        $account_update = (object) array('uid' => $account->uid, 'pass' => $new_hash);
+        drupal_write_record('users', $account_update, 'uid');
+      }
+    }
     if ($account->uid && !empty($account->openid)) {
       $authmap = array(
         'uid' => $account->uid,
@@ -172,6 +186,14 @@ class FeedsUserProcessor extends FeedsProcessor {
       'pass' => array(
         'name' => t('Unencrypted Password'),
         'description' => t('The unencrypted user password.'),
+      ),
+      'pass_crypted' => array(
+        'name' => t('Encrypted Password'),
+        'description' => t('The encrypted user password. It will be stored as is.'),
+      ),
+      'pass_md5' => array(
+        'name' => t('Encrypted Password (Old)'),
+        'description' => t('The encrypted user password in older versions of drupal (MD5 hash). It will be rehashed and stored.'),
       ),
       'status' => array(
         'name' => t('Account status'),
