@@ -2,6 +2,7 @@ name = Feeds
 description = Aggregates RSS/Atom/RDF feeds, imports CSV files and more.
 package = Feeds
 core = 7.x
+version = 2.x-dev-wwm
 dependencies[] = ctools
 dependencies[] = job_scheduler
 
