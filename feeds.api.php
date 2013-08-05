@@ -87,9 +87,9 @@ function hook_feeds_plugins() {
 /**
  * Invoked after a feed source has been parsed, before it will be processed.
  *
- * @param $source
+ * @param FeedsSource $source
  *  FeedsSource object that describes the source that has been imported.
- * @param $result
+ * @param FeedsParserResult $result
  *   FeedsParserResult object that has been parsed from the source.
  */
 function hook_feeds_after_parse(FeedsSource $source, FeedsParserResult $result) {
@@ -98,14 +98,52 @@ function hook_feeds_after_parse(FeedsSource $source, FeedsParserResult $result) 
 }
 
 /**
+ * Invoked before a feed source import starts.
+ *
+ * @param FeedsSource $source
+ *  FeedsSource object that describes the source that is going to be imported.
+ */
+function hook_feeds_before_import(FeedsSource $source) {
+  // See feeds_rules module's implementation for an example.
+}
+
+/**
+ * Invoked before a feed item is updated/created/replaced.
+ *
+ * This is called every time a feed item is processed no matter if the item gets
+ * updated or not.
+ *
+ * @param FeedsSource $source
+ *  The source for the current feed.
+ * @param array $item
+ *  All the current item from the feed.
+ * @param int|null $entity_id
+ *  The id of the current item which is going to be updated. If this is a new
+ *  item, then NULL is passed.
+ */
+function hook_feeds_before_update(FeedsSource $source, $item, $entity_id) {
+  if ($entity_id) {
+    $processor = $source->importer->processor;
+    db_update('foo_bar')
+      ->fields(array('entity_type' => $processor->entityType(), 'entity_id' => $entity_id, 'last_seen' => REQUEST_TIME))
+      ->condition('entity_type', $processor->entityType())
+      ->condition('entity_id', $entity_id)
+      ->execute();
+  }
+}
+
+/**
  * Invoked before a feed item is saved.
  *
- * @param $source
+ * @param FeedsSource $source
  *  FeedsSource object that describes the source that is being imported.
  * @param $entity
  *   The entity object.
- * @param $item
+ * @param array $item
  *   The parser result for this entity.
+ * @param int|null $entity_id
+ *  The id of the current item which is going to be updated. If this is a new
+ *  item, then NULL is passed.
  */
 function hook_feeds_presave(FeedsSource $source, $entity, $item) {
   if ($entity->feeds_item->entity_type == 'node') {
@@ -115,19 +153,37 @@ function hook_feeds_presave(FeedsSource $source, $entity, $item) {
 }
 
 /**
- * Invoked before a feed source import starts.
+ * Invoked after a feed item has been saved.
  *
- * @param $source
- *  FeedsSource object that describes the source that is going to be imported.
+ * @param FeedsSource $source
+ *  FeedsSource object that describes the source that is being imported.
+ * @param $entity
+ *   The entity object that has just been saved.
+ * @param array $item
+ *   The parser result for this entity.
+ * @param int|null $entity_id
+ *  The id of the current item which is going to be updated. If this is a new
+ *  item, then NULL is passed.
  */
-function hook_feeds_before_import(FeedsSource $source) {
-  // See feeds_rules module's implementation for an example.
+function hook_feeds_after_save(FeedsSource $source, $entity, $item, $entity_id) {
+  // Use $entity->nid of the saved node.
+
+  // Although the $entity object is passed by reference, any changes made in
+  // this function will be ignored by the FeedsProcessor.
+  $config = $source->importer->getConfig();
+
+  if ($config['processor']['config']['purge_unseen_items'] && isset($entity->feeds_item)) {
+    $feeds_item = $entity->feeds_item;
+    $feeds_item->batch_id = feeds_delete_get_current_batch($feeds_item->feed_nid);
+
+    drupal_write_record('feeds_delete_item', $feeds_item);
+  }
 }
 
 /**
  * Invoked after a feed source has been imported.
  *
- * @param $source
+ * @param FeedsSource $source
  *  FeedsSource object that describes the source that has been imported.
  */
 function hook_feeds_after_import(FeedsSource $source) {
@@ -137,7 +193,7 @@ function hook_feeds_after_import(FeedsSource $source) {
 /**
  * Invoked after a feed source has been cleared of its items.
  *
- * @param $source
+ * @param FeedsSource $source
  *  FeedsSource object that describes the source that has been cleared.
  */
 function hook_feeds_after_clear(FeedsSource $source) {

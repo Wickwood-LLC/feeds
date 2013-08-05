@@ -111,6 +111,15 @@ class FeedsNodeProcessor extends FeedsProcessor {
   }
 
   /**
+   * Validates a node.
+   */
+  protected function entityValidate($entity) {
+    if (!isset($entity->uid) || !is_numeric($entity->uid)) {
+       $entity->uid = $this->config['author'];
+    }
+  }
+
+  /**
    * Save a node.
    */
   public function entitySave($entity) {
@@ -172,8 +181,6 @@ class FeedsNodeProcessor extends FeedsProcessor {
    */
   public function configForm(&$form_state) {
     $form = parent::configForm($form_state);
-
-    $form['bundle']['#title'] = t('Content type');
 
     $author = user_load($this->config['author']);
     $form['author'] = array(
@@ -264,7 +271,7 @@ class FeedsNodeProcessor extends FeedsProcessor {
     $type = node_type_get_type($this->bundle());
 
     $targets = parent::getMappingTargets();
-    if ($type->has_title) {
+    if ($type && $type->has_title) {
       $targets['title'] = array(
         'name' => t('Title'),
         'description' => t('The title of the node.'),

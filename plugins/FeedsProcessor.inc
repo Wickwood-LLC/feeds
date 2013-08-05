@@ -183,6 +183,8 @@ abstract class FeedsProcessor extends FeedsPlugin {
       $entity_id = $this->existingEntityId($source, $parser_result);
       $skip_existing = $this->config['update_existing'] == FEEDS_SKIP_EXISTING;
 
+      module_invoke_all('feeds_before_update', $source, $item, $entity_id);
+
       // If it exists, and we are not updating, pass onto the next item.
       if ($entity_id && $skip_existing) {
         continue;
@@ -208,6 +210,7 @@ abstract class FeedsProcessor extends FeedsPlugin {
           // recently processed entity. The only carryover is the entity_id.
           $this->newItemInfo($entity, $source->feed_nid, $hash);
           $entity->feeds_item->entity_id = $entity_id;
+          $entity->feeds_item->is_new = FALSE;
         }
 
         // Build a new entity.
@@ -221,7 +224,7 @@ abstract class FeedsProcessor extends FeedsPlugin {
         $this->entityValidate($entity);
 
         // Allow modules to alter the entity before saving.
-        module_invoke_all('feeds_presave', $source, $entity, $item);
+        module_invoke_all('feeds_presave', $source, $entity, $item, $entity_id);
         if (module_exists('rules')) {
           rules_invoke_event('feeds_import_'. $source->importer()->id, $entity);
         }
@@ -234,6 +237,10 @@ abstract class FeedsProcessor extends FeedsPlugin {
         // This will throw an exception on failure.
         $this->entitySaveAccess($entity);
         $this->entitySave($entity);
+
+        // Allow modules to perform operations using the saved entity data.
+        // $entity contains the updated entity after saving.
+        module_invoke_all('feeds_after_save', $source, $entity, $item, $entity_id);
 
         // Track progress.
         if (empty($entity_id)) {
@@ -248,11 +255,7 @@ abstract class FeedsProcessor extends FeedsPlugin {
       catch (Exception $e) {
         $state->failed++;
         drupal_set_message($e->getMessage(), 'warning');
-        $message = $e->getMessage();
-        $message .= '<h3>Original item</h3>';
-        $message .= '<pre>' . var_export($item, TRUE) . '</pre>';
-        $message .= '<h3>Entity</h3>';
-        $message .= '<pre>' . var_export($entity, TRUE) . '</pre>';
+        $message = $this->createLogMessage($e, $entity, $item);
         $source->log('import', $message, array(), WATCHDOG_ERROR);
       }
     }
@@ -549,7 +552,7 @@ abstract class FeedsProcessor extends FeedsPlugin {
       $form['bundle'] = array(
         '#type' => 'select',
         '#options' => $this->bundleOptions(),
-        '#title' => t('Bundle'),
+        '#title' => !empty($info['bundle name']) ? $info['bundle name'] : t('Bundle'),
         '#required' => TRUE,
         '#default_value' => $this->bundle(),
       );
@@ -616,6 +619,16 @@ abstract class FeedsProcessor extends FeedsPlugin {
    *   FALSE otherwise.
    */
   public function getMappingTargets() {
+
+    // The bundle has not been selected.
+    if (!$this->bundle()) {
+      $info = $this->entityInfo();
+      $bundle_name = !empty($info['bundle name']) ? drupal_strtolower($info['bundle name']) : t('bundle');
+      $plugin_key = feeds_importer($this->id)->config['processor']['plugin_key'];
+      $url = url('admin/structure/feeds/' . $this->id . '/settings/' . $plugin_key);
+      drupal_set_message(t('Please <a href="@url">select a @bundle_name</a>.', array('@url' => $url, '@bundle_name' => $bundle_name)), 'warning', FALSE);
+    }
+
     return array(
       'url' => array(
         'name' => t('URL'),
@@ -723,6 +736,7 @@ abstract class FeedsProcessor extends FeedsPlugin {
    */
   protected function newItemInfo($entity, $feed_nid, $hash = '') {
     $entity->feeds_item = new stdClass();
+    $entity->feeds_item->is_new = TRUE;
     $entity->feeds_item->entity_id = 0;
     $entity->feeds_item->entity_type = $this->entityType();
     $entity->feeds_item->id = $this->id;
@@ -763,11 +777,7 @@ abstract class FeedsProcessor extends FeedsPlugin {
    *  Empty/NULL/FALSE strings return d41d8cd98f00b204e9800998ecf8427e
    */
   protected function hash($item) {
-    static $serialized_mappings;
-    if (!$serialized_mappings) {
-      $serialized_mappings = serialize($this->config['mappings']);
-    }
-    return hash('md5', serialize($item) . $serialized_mappings);
+    return hash('md5', serialize($item) . serialize($this->config['mappings']));
   }
 
   /**
@@ -784,6 +794,30 @@ abstract class FeedsProcessor extends FeedsPlugin {
     }
     return '';
   }
+
+  /**
+   * Creates a log message for when an exception occured during import.
+   *
+   * @param Exception $e
+   *   The exception that was throwned during processing the item.
+   * @param $entity
+   *   The entity object.
+   * @param $item
+   *   The parser result for this entity.
+   *
+   * @return string
+   *   The message to log.
+   */
+  protected function createLogMessage(Exception $e, $entity, $item) {
+    include_once DRUPAL_ROOT . '/includes/utility.inc';
+    $message = $e->getMessage();
+    $message .= '<h3>Original item</h3>';
+    $message .= '<pre>' . drupal_var_export($item). '</pre>';
+    $message .= '<h3>Entity</h3>';
+    $message .= '<pre>' . drupal_var_export($entity) . '</pre>';
+    return $message;
+  }
+
 }
 
 class FeedsProcessorBundleNotDefined extends Exception {}
