@@ -44,7 +44,7 @@ function feeds_requirements($phase) {
       $requirements['simplepie']['severity'] = REQUIREMENT_WARNING;
       $requirements['simplepie']['description'] .= ' ' . t(
         'Download the compiled version of the library from <a href="@simplepie-download-url">SimplePie download page</a>.',
-        array('@simplepie-download-page' => 'http://simplepie.org/downloads/')
+        array('@simplepie-download-url' => 'http://simplepie.org/downloads/')
       );
     }
   }
@@ -56,6 +56,7 @@ function feeds_requirements($phase) {
   */
 function feeds_uninstall() {
   variable_del('http_request_timeout');
+  variable_del('feeds_reschedule');
 }
 
 /**
@@ -658,7 +659,25 @@ function feeds_update_7208(&$sandbox) {
         ->condition('id', $importer)
         ->execute();
     }
-  }
 
-  $sandbox['#finished'] = 1 - count($sandbox['importers']) / $sandbox['total'];
+    $sandbox['#finished'] = 1 - count($sandbox['importers']) / $sandbox['total'];
+  }
+  else {
+    $sandbox['#finished'] = 1;
+  }
+}
+
+/**
+ * Reschedules feeds jobs.
+ */
+function feeds_update_7209() {
+  // Reschedule all importers.
+  variable_set('feeds_reschedule', TRUE);
+
+  // Our expire callback has changed names, remove all existing callbacks.
+  db_delete('job_schedule')
+    ->condition('name', 'feeds_importer_expire')
+    ->execute();
+
+  DrupalQueue::get('feeds_importer_expire')->deleteQueue();
 }

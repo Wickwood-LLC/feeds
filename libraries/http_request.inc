@@ -24,8 +24,10 @@ define('HTTP_REQUEST_PCRE_TAG_ATTRIBUTES', '/[\x09\x0A\x0B\x0C\x0D\x20]+([^\x09\
 class HRCurlException extends Exception {}
 
 /**
- * Discover RSS or atom feeds at the given URL. If document in given URL is an
- * HTML document, function attempts to discover RSS or Atom feeds.
+ * Discovers RSS or atom feeds at the given URL.
+ *
+ * If document in given URL is an HTML document, function attempts to discover
+ * RSS or Atom feeds.
  *
  * @param string $url
  *   The url of the feed to retrieve.
@@ -52,7 +54,7 @@ function http_request_get_common_syndication($url, $settings = NULL) {
   // @see http_request_get.
   $downloaded_string = $download->data;
   // If this happens to be a feed then just return the url.
-  if (http_request_is_feed($download->headers['content-type'], $downloaded_string)) {
+  if (isset($download->headers['content-type']) && http_request_is_feed($download->headers['content-type'], $downloaded_string)) {
     return $url;
   }
 
@@ -139,6 +141,7 @@ function http_request_get($url, $username = NULL, $password = NULL, $accept_inva
   if ($curl) {
     $headers[] = 'User-Agent: Drupal (+http://drupal.org/)';
     $result = new stdClass();
+    $result->headers = array();
 
     // Parse the URL and make sure we can handle the schema.
     // cURL can only support either http:// or https://.
@@ -154,6 +157,7 @@ function http_request_get($url, $username = NULL, $password = NULL, $accept_inva
         case 'https':
           // Valid scheme.
           break;
+
         default:
           $result->error = 'invalid schema ' . $uri['scheme'];
           $result->code = -1003;
@@ -174,6 +178,22 @@ function http_request_get($url, $username = NULL, $password = NULL, $accept_inva
       curl_setopt($download, CURLOPT_RETURNTRANSFER, TRUE);
       curl_setopt($download, CURLOPT_ENCODING, '');
       curl_setopt($download, CURLOPT_TIMEOUT, $request_timeout);
+
+      $proxy_server = variable_get('proxy_server');
+
+      if ($proxy_server && _drupal_http_use_proxy($uri['host'])) {
+        curl_setopt($download, CURLOPT_PROXY, $proxy_server);
+        curl_setopt($download, CURLOPT_PROXYPORT, variable_get('proxy_port', 8080));
+
+        // Proxy user/password.
+        if ($proxy_username = variable_get('proxy_username')) {
+          $username_password = $proxy_username . ':' . variable_get('proxy_password', '');
+
+          curl_setopt($download, CURLOPT_PROXYUSERPWD, $username_password);
+          curl_setopt($download, CURLOPT_PROXYAUTH, variable_get('proxy_auth_method', CURLAUTH_BASIC));
+        }
+      }
+
       if ($accept_invalid_cert) {
         curl_setopt($download, CURLOPT_SSL_VERIFYPEER, 0);
       }
@@ -184,9 +204,21 @@ function http_request_get($url, $username = NULL, $password = NULL, $accept_inva
           t('cURL error (@code) @error for @url', array(
             '@code' => curl_errno($download),
             '@error' => curl_error($download),
-            '@url' => $url
+            '@url' => $url,
           )), curl_errno($download)
         );
+      }
+
+      // When using a proxy, remove extra data from the header which is not
+      // considered by CURLINFO_HEADER_SIZE (possibly cURL bug).
+      // This data is only added when to HTTP header when working with a proxy.
+      // Example string added: <HTTP/1.0 200 Connection established\r\n\r\n>
+      if ($proxy_server && _drupal_http_use_proxy($uri['host'])) {
+        $http_header_break = "\r\n\r\n";
+        $response = explode($http_header_break, $data);
+        if (count($response) > 2) {
+          $data = substr($data, strlen($response[0] . $http_header_break), strlen($data));
+        }
       }
 
       $header_size = curl_getinfo($download, CURLINFO_HEADER_SIZE);
@@ -194,8 +226,8 @@ function http_request_get($url, $username = NULL, $password = NULL, $accept_inva
       $result->data = substr($data, $header_size);
       $headers = preg_split("/(\r\n){2}/", $header);
       $header_lines = preg_split("/\r\n|\n|\r/", end($headers));
-      $result->headers = array();
-      array_shift($header_lines); // skip HTTP response status
+      // Skip HTTP response status.
+      array_shift($header_lines);
 
       while ($line = trim(array_shift($header_lines))) {
         list($header, $value) = explode(':', $line, 2);
@@ -218,6 +250,7 @@ function http_request_get($url, $username = NULL, $password = NULL, $accept_inva
   }
   else {
     $result = drupal_http_request($url, array('headers' => $headers, 'timeout' => $request_timeout));
+    $result->headers = isset($result->headers) ? $result->headers : array();
   }
 
   $result->code = isset($result->code) ? $result->code : 200;
@@ -248,7 +281,7 @@ function http_request_get($url, $username = NULL, $password = NULL, $accept_inva
  * Decides if it's possible to use cURL or not.
  *
  * @return bool
- *   TRUE if curl is available, FALSE otherwise.
+ *   TRUE if cURL is available, FALSE otherwise.
  */
 function http_request_use_curl() {
   // Allow site administrators to choose to not use cURL.
@@ -272,13 +305,13 @@ function http_request_clear_cache($url) {
  * Returns if the provided $content_type is a feed.
  *
  * @param string $content_type
- *  The Content-Type header.
+ *   The Content-Type header.
  *
  * @param string $data
- *  The actual data from the http request.
+ *   The actual data from the http request.
  *
  * @return bool
- *  Returns TRUE if this is a parsable feed.
+ *   Returns TRUE if this is a parsable feed.
  */
 function http_request_is_feed($content_type, $data) {
   $pos = strpos($content_type, ';');
@@ -299,10 +332,10 @@ function http_request_is_feed($content_type, $data) {
  * Finds potential feed tags in the HTML document.
  *
  * @param string $html
- *  The html string to search.
+ *   The html string to search.
  *
  * @return array
- *  An array of href to feeds.
+ *   An array of href to feeds.
  */
 function http_request_find_feeds($html) {
   $matches = array();
@@ -318,7 +351,11 @@ function http_request_find_feeds($html) {
     preg_match_all(HTTP_REQUEST_PCRE_TAG_ATTRIBUTES, $link_tag, $attributes, PREG_SET_ORDER);
     foreach ($attributes as $attribute) {
       // Find the key value pairs, attribute[1] is key and attribute[2] is the
-      // value.
+      // value.  However, if the link tag used single quotes, the value might
+      // be in attribute[3] instead.
+      if (empty($attribute[2])) {
+        $attribute[2] = $attribute[3];
+      }
       if (!empty($attribute[1]) && !empty($attribute[2])) {
         $candidate[drupal_strtolower($attribute[1])] = drupal_strtolower(decode_entities($attribute[2]));
       }
