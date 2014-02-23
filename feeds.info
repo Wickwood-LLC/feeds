@@ -1,5 +1,5 @@
 name = Feeds
-description = Aggregates RSS/Atom/RDF feeds, imports CSV files and more. Patched by WWM to support import of encrypted passwords from https://drupal.org/files/1611554-3-support-for-encrypted-passwords.patch. 
+description = Aggregates RSS/Atom/RDF feeds, imports CSV files and more. Patched by WWM to support import of encrypted passwords from https://drupal.org/files/feeds-support-for-encrypted-passwords-1611554-9.patch. 
 package = Feeds
 core = 7.x
 version = 2.x-dev-wwm
