@@ -72,7 +72,6 @@ class FeedsUserProcessor extends FeedsProcessor {
     }
 
     user_save($account, $edit);
-
     if ($account->uid && !empty($account->pass_crypted)) {
       $account_update = (object) array('uid' => $account->uid, 'pass' => $account->pass_crypted);
       drupal_write_record('users', $account_update, 'uid');
@@ -196,7 +195,7 @@ class FeedsUserProcessor extends FeedsProcessor {
         'description' => t('The encrypted user password. It will be stored as is.'),
       ),
       'pass_md5' => array(
-        'name' => t('Encrypted Password (Old)'),
+        'name' => t('Encrypted Password (MD5)'),
         'description' => t('The encrypted user password in older versions of drupal (MD5 hash). It will be rehashed and stored.'),
       ),
       'status' => array(
