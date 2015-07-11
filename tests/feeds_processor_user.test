@@ -6,7 +6,7 @@
  */
 
 /**
- * Test aggregating a feed as data records.
+ * Test aggregating a feed as user items.
  */
 class FeedsCSVtoUsersTest extends FeedsWebTestCase {
   public static function getInfo() {
@@ -18,7 +18,7 @@ class FeedsCSVtoUsersTest extends FeedsWebTestCase {
   }
 
   /**
-   * Test node creation, refreshing/deleting feeds and feed items.
+   * Test user creation, refreshing/deleting feeds and feed items.
    */
   public function test() {
     // Create an importer.
@@ -114,9 +114,131 @@ class FeedsCSVtoUsersTest extends FeedsWebTestCase {
     $this->assertText('Failed importing 2 user');
 
     // Attempt to log in as one of the imported users.
-    $account = user_load_by_name('Fester');
+    $this->feedsLoginUser('Fester', 'fest');
+  }
+
+  /**
+   * Test if users with md5 passwords can login after import.
+   */
+  public function testMD5() {
+    // Create an importer.
+    $this->createImporterConfiguration('User import', 'user_import');
+
+    // Set and configure plugins.
+    $this->setPlugin('user_import', 'FeedsFileFetcher');
+    $this->setPlugin('user_import', 'FeedsCSVParser');
+    $this->setPlugin('user_import', 'FeedsUserProcessor');
+
+    // Go to mapping page and create a couple of mappings.
+    $mappings = array(
+      0 => array(
+        'source' => 'name',
+        'target' => 'name',
+        'unique' => FALSE,
+      ),
+      1 => array(
+        'source' => 'mail',
+        'target' => 'mail',
+        'unique' => TRUE,
+      ),
+      2 => array(
+        'source' => 'since',
+        'target' => 'created',
+      ),
+      3 => array(
+        'source' => 'password_md5',
+        'target' => 'pass',
+        'pass_encryption' => 'md5',
+      ),
+    );
+    $this->addMappings('user_import', $mappings);
+
+    // Use standalone form.
+    $edit = array(
+      'content_type' => '',
+    );
+    $this->drupalPost('admin/structure/feeds/user_import/settings', $edit, 'Save');
+
+    // Import CSV file.
+    $this->importFile('user_import', $this->absolutePath() . '/tests/feeds/users.csv');
+
+    // Assert result.
+    $this->assertText('Created 3 users');
+
+    // Try to login as each successful imported user.
+    $this->feedsLoginUser('Morticia', 'mort');
+    $this->feedsLoginUser('Fester', 'fest');
+    $this->feedsLoginUser('Gomez', 'gome');
+  }
+
+  /**
+   * Test if users with sha512 passwords can login after import.
+   */
+  public function testSha512() {
+    // Create an importer.
+    $this->createImporterConfiguration('User import', 'user_import');
+
+    // Set and configure plugins.
+    $this->setPlugin('user_import', 'FeedsFileFetcher');
+    $this->setPlugin('user_import', 'FeedsCSVParser');
+    $this->setPlugin('user_import', 'FeedsUserProcessor');
+
+    // Go to mapping page and create a couple of mappings.
+    $mappings = array(
+      0 => array(
+        'source' => 'name',
+        'target' => 'name',
+        'unique' => FALSE,
+      ),
+      1 => array(
+        'source' => 'mail',
+        'target' => 'mail',
+        'unique' => TRUE,
+      ),
+      2 => array(
+        'source' => 'since',
+        'target' => 'created',
+      ),
+      3 => array(
+        'source' => 'password_sha512',
+        'target' => 'pass',
+        'pass_encryption' => 'sha512',
+      ),
+    );
+    $this->addMappings('user_import', $mappings);
+
+    // Use standalone form.
+    $edit = array(
+      'content_type' => '',
+    );
+    $this->drupalPost('admin/structure/feeds/user_import/settings', $edit, 'Save');
+
+    // Import CSV file.
+    $this->importFile('user_import', $this->absolutePath() . '/tests/feeds/users.csv');
+
+    // Assert result.
+    $this->assertText('Created 3 users');
+
+    // Try to login as each successful imported user.
+    $this->feedsLoginUser('Morticia', 'mort');
+    $this->feedsLoginUser('Fester', 'fest');
+    $this->feedsLoginUser('Gomez', 'gome');
+  }
+
+  /**
+   * Log in an imported user.
+   *
+   * @param string $username
+   *   The user's username.
+   * @param string $password
+   *   The user's password.
+   *
+   * @return void
+   */
+  public function feedsLoginUser($username, $password) {
+    $account = user_load_by_name($username);
     $this->assertTrue($account, 'Imported user account loaded.');
-    $account->pass_raw = 'fest';
+    $account->pass_raw = $password;
     $this->drupalLogin($account);
   }
 }

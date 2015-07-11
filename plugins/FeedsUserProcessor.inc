@@ -10,6 +10,21 @@
  */
 class FeedsUserProcessor extends FeedsProcessor {
   /**
+   * Unencrypted password.
+   */
+  const PASS_UNENCRYPTED = 'none';
+
+  /**
+   * MD5 encrypted password.
+   */
+  const PASS_MD5 = 'md5';
+
+  /**
+   * SHA512 encrypted password.
+   */
+  const PASS_SHA512 = 'sha512';
+
+  /**
    * Define entity type.
    */
   public function entityType() {
@@ -72,6 +87,12 @@ class FeedsUserProcessor extends FeedsProcessor {
     }
 
     user_save($account, $edit);
+    if ($account->uid && !empty($account->pass_crypted)) {
+      db_update('users')
+        ->fields(array('pass' => $account->pass_crypted))
+        ->condition('uid', $account->uid)
+        ->execute();
+    }
     if ($account->uid && !empty($account->openid)) {
       $authmap = array(
         'uid' => $account->uid,
@@ -136,10 +157,13 @@ class FeedsUserProcessor extends FeedsProcessor {
   }
 
   /**
-   * Override setTargetElement to operate on a target item that is a node.
+   * Override setTargetElement() to operate on a target item that is an user.
    */
-  public function setTargetElement(FeedsSource $source, $target_user, $target_element, $value) {
+  public function setTargetElement(FeedsSource $source, $target_user, $target_element, $value, $mapping = array()) {
     switch ($target_element) {
+      case 'pass':
+        $this->setPassTarget($source, $target_user, $target_element, $value, $mapping);
+        break;
       case 'created':
         $target_user->created = feeds_to_unixtime($value, REQUEST_TIME);
         break;
@@ -173,8 +197,10 @@ class FeedsUserProcessor extends FeedsProcessor {
         'description' => t('The created (e. g. joined) data of the user.'),
        ),
       'pass' => array(
-        'name' => t('Unencrypted Password'),
-        'description' => t('The unencrypted user password.'),
+        'name' => t('Password'),
+        'description' => t('The user password.'),
+        'summary_callback' => array($this, 'passSummaryCallback'),
+        'form_callback' => array($this, 'passFormCallback'),
       ),
       'status' => array(
         'name' => t('Account status'),
@@ -230,5 +256,124 @@ class FeedsUserProcessor extends FeedsProcessor {
       }
     }
     return 0;
+  }
+
+  /**
+   * Summary callback for pass mapper.
+   *
+   * @param array $mapping
+   *   Associative array of the mapping settings.
+   * @param array $target
+   *   Array of target settings, as defined by the processor.
+   * @param array $form
+   *   The whole mapping form.
+   * @param array $form_state
+   *   The form state of the mapping form.
+   *
+   * @return string
+   *   Returns, as a string that may contain HTML, the summary to display while
+   *   the full form isn't visible.
+   *   If the return value is empty, no summary and no option to view the form
+   *   will be displayed.
+   */
+  public function passSummaryCallback($mapping, $target, $form, $form_state) {
+    $options = $this->passSummaryCallbackOptions();
+    if (!isset($mapping['pass_encryption'])) {
+      $mapping['pass_encryption'] = self::PASS_UNENCRYPTED;
+    }
+    return t('Password encryption: <strong>@encryption</strong>', array('@encryption' => $options[$mapping['pass_encryption']]));
+  }
+
+  /**
+   * Returns the list of available password encryption methods.
+   *
+   * Used by ::passSummaryCallback().
+   *
+   * @return array
+   *    An array of password encryption option titles.
+   * @see passSummaryCallback()
+   */
+  protected function passSummaryCallbackOptions() {
+    return array(
+      self::PASS_UNENCRYPTED => t('None'),
+      self::PASS_MD5 => t('MD5'),
+      self::PASS_SHA512 => t('SHA512'),
+    );
+  }
+
+  /**
+   * Settings form callback for pass mapper.
+   *
+   * @param array $mapping
+   *   Associative array of the mapping settings.
+   * @param array $target
+   *   Array of target settings, as defined by the processor.
+   * @param array $form
+   *   The whole mapping form.
+   * @param array $form_state
+   *   The form state of the mapping form.
+   *
+   * @return array
+   *   Mapping configuration form for pass mapper.
+   */
+  public function passFormCallback($mapping, $target, $form, $form_state) {
+    return array(
+      'pass_encryption' => array(
+        '#type' => 'select',
+        '#title' => t('Password encryption'),
+        '#options' => $this->passFormCallbackOptions(),
+        '#default_value' => !empty($mapping['pass_encryption']) ? $mapping['pass_encryption'] : self::PASS_UNENCRYPTED,
+      ),
+    );
+  }
+
+  /**
+   * Returns the list of available password encryption methods.
+   *
+   * Used by ::passFormCallback().
+   *
+   * @return array
+   *    An array of password encryption option titles.
+   * @see passFormCallback()
+   */
+  protected function passFormCallbackOptions() {
+    return array(
+      self::PASS_UNENCRYPTED => t('Unencrypted'),
+      self::PASS_MD5 => t('MD5 (used in older versions of Drupal)'),
+      self::PASS_SHA512 => t('SHA512 (default in Drupal 7)'),
+    );
+  }
+
+  /**
+   * Sets the password on the user target.
+   *
+   * @see setTargetElement()
+   */
+  protected function setPassTarget($source, $target_user, $target_element, $value, $mapping) {
+    if (empty($value)) {
+      return;
+    }
+    if (!isset($mapping['pass_encryption'])) {
+      $mapping['pass_encryption'] = self::PASS_UNENCRYPTED;
+    }
+
+    switch ($mapping['pass_encryption']) {
+      case self::PASS_MD5:
+        require_once DRUPAL_ROOT . '/' . variable_get('password_inc', 'includes/password.inc');
+        $new_hash = user_hash_password($value);
+        if ($new_hash) {
+          // Indicate an updated password.
+          $new_hash  = 'U' . $new_hash;
+          $target_user->pass_crypted = $new_hash;
+        }
+        break;
+      case self::PASS_SHA512:
+        $target_user->pass_crypted = $value;
+        break;
+      default:
+        $target_user->pass = $value;
+        break;
+
+    }
   }
 }
