@@ -2,13 +2,21 @@
 
 /**
  * @file
- * FeedsUserProcessor class.
+ * Contains FeedsUserProcessor.
  */
+
+/**
+ * Option to block users not found in the feed.
+ *
+ * @var string
+ */
+define('FEEDS_BLOCK_NON_EXISTENT', 'block');
 
 /**
  * Feeds processor plugin. Create users from feed items.
  */
 class FeedsUserProcessor extends FeedsProcessor {
+
   /**
    * Unencrypted password.
    */
@@ -153,6 +161,7 @@ class FeedsUserProcessor extends FeedsProcessor {
       '#description' => t('This appends _test to all imported e-mail addresses to ensure they cannot be used as recipients.'),
       '#default_value' => $this->config['defuse_mail'],
     );
+    $form['update_non_existent']['#options'][FEEDS_BLOCK_NON_EXISTENT] = t('Block non-existent users');
     return $form;
   }
 
@@ -219,11 +228,7 @@ class FeedsUserProcessor extends FeedsProcessor {
        );
     }
 
-    // Let other modules expose mapping targets.
-    self::loadMappers();
-    $entity_type = $this->entityType();
-    $bundle = $this->bundle();
-    drupal_alter('feeds_processor_targets', $targets, $entity_type, $bundle);
+    $this->getHookTargets($targets);
 
     return $targets;
   }
@@ -259,72 +264,33 @@ class FeedsUserProcessor extends FeedsProcessor {
   }
 
   /**
-   * Summary callback for pass mapper.
+   * Overrides FeedsProcessor::clean().
    *
-   * @param array $mapping
-   *   Associative array of the mapping settings.
-   * @param array $target
-   *   Array of target settings, as defined by the processor.
-   * @param array $form
-   *   The whole mapping form.
-   * @param array $form_state
-   *   The form state of the mapping form.
+   * Block users instead of deleting them.
    *
-   * @return string
-   *   Returns, as a string that may contain HTML, the summary to display while
-   *   the full form isn't visible.
-   *   If the return value is empty, no summary and no option to view the form
-   *   will be displayed.
+   * @param FeedsState $state
+   *   The FeedsState object for the given stage.
    */
-  public function passSummaryCallback($mapping, $target, $form, $form_state) {
-    $options = $this->passSummaryCallbackOptions();
-    if (!isset($mapping['pass_encryption'])) {
-      $mapping['pass_encryption'] = self::PASS_UNENCRYPTED;
+  protected function clean(FeedsState $state) {
+    // Delegate to parent if not blocking or option not set.
+    if (!isset($this->config['update_non_existent']) || $this->config['update_non_existent'] !== FEEDS_BLOCK_NON_EXISTENT) {
+      return parent::clean($state);
     }
-    return t('Password encryption: <strong>@encryption</strong>', array('@encryption' => $options[$mapping['pass_encryption']]));
-  }
 
-  /**
-   * Returns the list of available password encryption methods.
-   *
-   * Used by ::passSummaryCallback().
-   *
-   * @return array
-   *    An array of password encryption option titles.
-   * @see passSummaryCallback()
-   */
-  protected function passSummaryCallbackOptions() {
-    return array(
-      self::PASS_UNENCRYPTED => t('None'),
-      self::PASS_MD5 => t('MD5'),
-      self::PASS_SHA512 => t('SHA512'),
-    );
-  }
-
-  /**
-   * Settings form callback for pass mapper.
-   *
-   * @param array $mapping
-   *   Associative array of the mapping settings.
-   * @param array $target
-   *   Array of target settings, as defined by the processor.
-   * @param array $form
-   *   The whole mapping form.
-   * @param array $form_state
-   *   The form state of the mapping form.
-   *
-   * @return array
-   *   Mapping configuration form for pass mapper.
-   */
-  public function passFormCallback($mapping, $target, $form, $form_state) {
-    return array(
-      'pass_encryption' => array(
-        '#type' => 'select',
-        '#title' => t('Password encryption'),
-        '#options' => $this->passFormCallbackOptions(),
-        '#default_value' => !empty($mapping['pass_encryption']) ? $mapping['pass_encryption'] : self::PASS_UNENCRYPTED,
-      ),
-    );
+    if (!empty($state->removeList)) {
+      // @see user_user_operations_block().
+      // The following foreach is copied from above function but with an added
+      // counter to count blocked users.
+      foreach (user_load_multiple($state->removeList) as $account) {
+        $this->loadItemInfo($account);
+        $account->feeds_item->hash = $this->config['update_non_existent'];
+        // For efficiency manually save the original account before applying any
+        // changes.
+        $account->original = clone $account;
+        user_save($account, array('status' => 0));
+        $state->blocked++;
+      }
+    }
   }
 
   /**
